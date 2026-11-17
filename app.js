@@ -3,7 +3,7 @@
   const $ = (id) => document.getElementById(id);
   const ui = {
     status: $('statusText'), map: $('mapSelect'), date: $('dateSelect'), customDateBtn: $('customDateBtn'),
-    match: $('matchSelect'), customMatchBtn: $('customMatchBtn'), reset: $('resetButton'), notice: $('notice'),
+    match: $('matchSelect'), customMatchBtn: $('customMatchBtn'), eventFilter: $('eventFilterSelect'), reset: $('resetButton'), notice: $('notice'),
     mapHeading: $('mapHeading'), mapViewport: $('mapViewport'), mapSvg: $('mapSvg'), mapImage: $('mapImage'), heatImage: $('heatImage'),
     mapEmpty: $('mapEmpty'), heat: $('heatLayer'), paths: $('pathLayer'), events: $('eventLayer'), caption: $('mapCaption'), outside: $('outsideCount'), tooltip: $('mapTooltip'),
     zoomIn: $('zoomIn'), zoomOut: $('zoomOut'), fit: $('fitButton'),
@@ -63,6 +63,7 @@
   let selectedDates = [];
   let isAllDates = false;
   let selectedMatchIds = '*'; // '*' or Set of string match IDs or single match string
+  let currentEventFilter = 'all';
   let activeHeatModes = new Set(); // Set of 'traffic', 'kills', 'deaths'
   let activeIntelTab = 'insights'; // 'insights' | 'smart' | 'combat' | 'all'
   let ollamaConnected = false;
@@ -79,7 +80,7 @@
   const fmtExact = (s) => `${fmtTime(s)}${Math.floor((Number(s) || 0) % 1 * 10) ? `.${Math.floor((Number(s) || 0) % 1 * 10)}` : ''}`;
   const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
   const setNotice = (message, error = false) => { ui.notice.textContent = message; ui.notice.hidden = !message; ui.notice.classList.toggle('is-error', error); };
-  function setStatus(text, ready = false) { ui.status.textContent = text; document.querySelector('.status-dot').classList.toggle('ready', ready); }
+  function setStatus(text, ready = false) { if (ui.status) ui.status.textContent = text; const dot = document.querySelector('.status-dot'); if (dot) dot.classList.toggle('ready', ready); }
   function svgElement(tag, attrs = {}) { const el = document.createElementNS(svgNS, tag); for (const [key, value] of Object.entries(attrs)) el.setAttribute(key, value); return el; }
   function datasetsForFilters() { return manifest.datasets.filter((entry) => entry && entry.map && entry.date && entry.file && MAPS[entry.map]); }
 
@@ -94,7 +95,7 @@
     ui.map.disabled = !maps.length;
     if (!maps.length) throw new Error('The manifest contains no supported map datasets.');
     ui.map.value = maps.includes('AmbroseValley') ? 'AmbroseValley' : maps[0];
-    ui.date.disabled = false; ui.customDateBtn.disabled = false; ui.match.disabled = false; ui.customMatchBtn.disabled = false; ui.reset.disabled = false;
+    ui.date.disabled = false; ui.customDateBtn.disabled = false; ui.match.disabled = false; ui.customMatchBtn.disabled = false; if (ui.eventFilter) ui.eventFilter.disabled = false; ui.reset.disabled = false;
     selectedDates = [];
     isAllDates = false;
     selectedMatchIds = '*';
@@ -214,9 +215,8 @@
     if (ui.smartTextDisplay) ui.smartTextDisplay.innerHTML = '';
     if (ui.smartModalTextDisplay) ui.smartModalTextDisplay.innerHTML = '';
 
-    const mapLabel = MAPS[ui.map.value]?.label || 'Match';
-    const datesLabel = isAllDates ? 'All recorded dates (Feb 10 — 14)' : selectedDates.map(formatDate).join(', ');
-    ui.mapHeading.textContent = `${mapLabel} · ${datesLabel}`;
+    const mapLabel = MAPS[ui.map.value]?.label || 'Match map';
+    ui.mapHeading.textContent = mapLabel;
 
     const allMatches = matchesForCurrentSelection();
     if (!allMatches.length) {
@@ -272,12 +272,14 @@
         ui.mapSvg.removeAttribute('hidden');
         ui.mapEmpty.hidden = true;
       }
+      if (ui.eventFilter) ui.eventFilter.disabled = !activeData.length;
       updateSummary(); updateInsights(); updateCombatFeed(); updateEvents(); updateTimeline(); draw();
     } catch (error) {
       if (token !== selectionToken) return;
       setStatus('Unable to load data');
       setNotice(`${error.message} Check that data/manifest.json and files are reachable.`, true);
       emptyState('Data could not be loaded.');
+      if (ui.eventFilter) ui.eventFilter.disabled = true;
       updateSummary(); updateInsights(); updateCombatFeed(); updateEvents(); updateTimeline();
     }
   }
@@ -484,6 +486,48 @@
   }
   function matchesEvents() { return cachedStream; }
 
+  function isEventMatch(e, filter) {
+    if (!filter || filter === 'all') return true;
+    if (filter === 'KilledByStorm') return e.type === 'KilledByStorm';
+    if (filter === 'combat') return ['Kill', 'BotKill', 'Killed', 'BotKilled', 'KilledByStorm'].includes(e.type);
+    if (filter === 'kills') return ['Kill', 'BotKill'].includes(e.type);
+    if (filter === 'deaths') return ['Killed', 'BotKilled', 'KilledByStorm'].includes(e.type);
+    if (filter === 'Kill') return e.type === 'Kill';
+    if (filter === 'BotKill') return e.type === 'BotKill';
+    if (filter === 'Killed') return e.type === 'Killed';
+    if (filter === 'BotKilled') return e.type === 'BotKilled';
+    if (filter === 'Loot') return e.type === 'Loot';
+    return e.type === filter;
+  }
+
+  function setEventFilter(filterVal) {
+    currentEventFilter = filterVal || 'all';
+    if (ui.eventFilter && ui.eventFilter.value !== currentEventFilter) {
+      ui.eventFilter.value = currentEventFilter;
+    }
+    if (ui.allSignalsFilter && ui.allSignalsFilter.value !== currentEventFilter) {
+      ui.allSignalsFilter.value = currentEventFilter;
+    }
+    document.querySelectorAll('.legend-filter-btn').forEach((btn) => {
+      btn.classList.toggle('is-selected', btn.getAttribute('data-filter') === currentEventFilter);
+    });
+    draw();
+    updateTimeline();
+    if (activeIntelTab === 'all') {
+      updateEvents(true);
+    } else if (activeIntelTab === 'combat') {
+      updateCombatFeed(true);
+    }
+  }
+
+  function toggleEventFilter(filterVal) {
+    if (currentEventFilter === filterVal) {
+      setEventFilter('all');
+    } else {
+      setEventFilter(filterVal);
+    }
+  }
+
   function draw() {
     resetLayer();
     if (!activeData.length || !imageLoaded) return;
@@ -537,6 +581,7 @@
     }
     for (const e of eventStream) {
       if (e.t > cursor || !EVENT_LABELS[e.type] || !finite(e.x) || !finite(e.z)) continue;
+      if (!isEventMatch(e, currentEventFilter)) continue;
       const p = normalizedPoint([e.t, e.x, e.z], mapId), node = createEventMarker(e, p);
       ui.events.append(node); eventNodes.push({ node, event: e, point: p });
     }
@@ -751,7 +796,7 @@
           <strong>Analyze match telemetry with AI</strong>
           <span class="smart-teaser-sub">Generate tactical pacing, choke point, and spawn insights.</span>
         </div>
-        <button type="button" class="button button-small button-primary" id="btnGoToSmart">
+        <button type="button" class="button button-small button-smart" id="btnGoToSmart">
           Analyze ➔
         </button>
       </div>
@@ -774,7 +819,10 @@
 
   function updateCombatFeed(render = true) {
     if (!ui.combatFeedList) return;
-    const events = cachedCombatEvents;
+    let events = cachedCombatEvents;
+    if (currentEventFilter && currentEventFilter !== 'all') {
+      events = cachedCombatEvents.filter((e) => isEventMatch(e, currentEventFilter));
+    }
     let low = 0, high = events.length;
     while (low < high) {
       const mid = (low + high) >> 1;
@@ -795,7 +843,7 @@
       return;
     }
     if (!events.length) {
-      ui.combatFeedList.innerHTML = '<p class="muted">No combat engagements or casualty records found for this selection.</p>';
+      ui.combatFeedList.innerHTML = '<p class="muted">No matching combat records found for this selection.</p>';
       return;
     }
     ui.combatFeedList.innerHTML = events.map((e, i) => {
@@ -819,15 +867,8 @@
 
   function updateEvents(render = true) {
     if (!ui.eventList) return;
-    const filter = ui.allSignalsFilter ? ui.allSignalsFilter.value : 'all';
-    let filtered = cachedDiscrete;
-    if (filter === 'combat') {
-      filtered = cachedDiscrete.filter((e) => ['Kill', 'BotKill', 'Killed', 'BotKilled'].includes(e.type));
-    } else if (filter === 'Loot') {
-      filtered = cachedDiscrete.filter((e) => e.type === 'Loot');
-    } else if (filter === 'KilledByStorm') {
-      filtered = cachedDiscrete.filter((e) => e.type === 'KilledByStorm');
-    }
+    const filter = currentEventFilter;
+    let filtered = cachedDiscrete.filter((e) => isEventMatch(e, filter));
 
     let low = 0, high = filtered.length;
     while (low < high) {
@@ -956,35 +997,36 @@
   function startTypewriter(targets, onComplete) {
     stopTypewriter();
     const targetList = (Array.isArray(targets) ? targets : [targets]).filter(Boolean);
-    for (const t of targetList) {
-      t.innerHTML = '<span class="typewriter-content"></span><span class="typewriter-cursor">▌</span>';
-    }
     typewriterQueue = [];
     currentRawAiOutput = '';
     isTypewriterActive = true;
 
+    for (const t of targetList) {
+      t.innerHTML = renderMarkdown('', true);
+    }
+
     typewriterInterval = setInterval(() => {
       if (typewriterQueue.length > 0) {
-        const take = Math.min(3, typewriterQueue.length);
+        const take = Math.min(typewriterQueue.length > 80 ? 6 : typewriterQueue.length > 30 ? 4 : 2, typewriterQueue.length);
         for (let i = 0; i < take; i++) {
           currentRawAiOutput += typewriterQueue.shift();
         }
+        const liveHtml = renderMarkdown(currentRawAiOutput, true);
         for (const t of targetList) {
-          const contentSpan = t.querySelector('.typewriter-content');
-          if (contentSpan) contentSpan.textContent = currentRawAiOutput;
+          t.innerHTML = liveHtml;
           t.scrollTop = t.scrollHeight;
         }
       } else if (!isTypewriterActive) {
         clearInterval(typewriterInterval);
         typewriterInterval = null;
-        const rendered = renderMarkdown(currentRawAiOutput);
+        const rendered = renderMarkdown(currentRawAiOutput, false);
         for (const t of targetList) {
           t.innerHTML = rendered;
           t.scrollTop = t.scrollHeight;
         }
         if (onComplete) onComplete();
       }
-    }, 12);
+    }, 16);
   }
 
   function pushTypewriterText(text) {
@@ -1007,37 +1049,68 @@
     typewriterQueue = [];
   }
 
-  function renderMarkdown(text) {
+  function formatInlineMarkdown(str) {
+    if (!str) return '';
+    let out = str;
+    out = out.replace(/`([^`]+)`/g, '<code>$1</code>');
+    out = out.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    out = out.replace(/\*\*([^*]+)$/, '<strong>$1</strong>');
+    out = out.replace(/`([^`]+)$/, '<code>$1</code>');
+    return out;
+  }
+
+  function renderMarkdown(text, isStreaming = false) {
+    if (!text && !isStreaming) return '';
+    const cursorHtml = isStreaming ? '<span class="typewriter-cursor">▌</span>' : '';
+    if (!text && isStreaming) {
+      return `<div class="smart-formatted"><p class="smart-p">${cursorHtml}</p></div>`;
+    }
+
     let escaped = escapeHtml(text);
     const lines = escaped.split('\n');
     let inList = false;
     const outputLines = [];
-    for (let rawLine of lines) {
-      let line = rawLine;
-      const h3Match = line.match(/^###\s+(.*)$/);
-      const h4Match = line.match(/^####\s+(.*)$/);
+
+    let lastActiveIdx = -1;
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (lines[i].trim().length > 0) {
+        lastActiveIdx = i;
+        break;
+      }
+    }
+
+    for (let i = 0; i < lines.length; i++) {
+      let line = lines[i];
+      const isCursorLine = isStreaming && (i === lastActiveIdx || (lastActiveIdx === -1 && i === lines.length - 1));
+
+      const h2Match = line.match(/^##\s+(.*)$/);
+      const h3Match = line.match(/^###\s*(.*)$/);
+      const h4Match = line.match(/^####\s*(.*)$/);
       const bulletMatch = line.match(/^\s*[\*\-]\s+(.*)$/);
 
       if (bulletMatch) {
         if (!inList) { outputLines.push('<ul class="smart-ul">'); inList = true; }
-        outputLines.push(`<li class="smart-li">${formatInlineMarkdown(bulletMatch[1])}</li>`);
+        outputLines.push(`<li class="smart-li">${formatInlineMarkdown(bulletMatch[1])}${isCursorLine ? cursorHtml : ''}</li>`);
       } else {
         if (inList) { outputLines.push('</ul>'); inList = false; }
-        if (h3Match) {
-          outputLines.push(`<h4 class="smart-h3">${formatInlineMarkdown(h3Match[1])}</h4>`);
+        if (h2Match) {
+          outputLines.push(`<h3 class="smart-h3">${formatInlineMarkdown(h2Match[1])}${isCursorLine ? cursorHtml : ''}</h3>`);
+        } else if (h3Match) {
+          outputLines.push(`<h4 class="smart-h3">${formatInlineMarkdown(h3Match[1])}${isCursorLine ? cursorHtml : ''}</h4>`);
         } else if (h4Match) {
-          outputLines.push(`<h4 class="smart-h4">${formatInlineMarkdown(h4Match[1])}</h4>`);
+          outputLines.push(`<h4 class="smart-h4">${formatInlineMarkdown(h4Match[1])}${isCursorLine ? cursorHtml : ''}</h4>`);
         } else if (line.trim()) {
-          outputLines.push(`<p class="smart-p">${formatInlineMarkdown(line)}</p>`);
+          outputLines.push(`<p class="smart-p">${formatInlineMarkdown(line)}${isCursorLine ? cursorHtml : ''}</p>`);
         }
       }
     }
     if (inList) outputLines.push('</ul>');
-    return `<div class="smart-formatted">${outputLines.join('')}</div>`;
-  }
 
-  function formatInlineMarkdown(str) {
-    return str.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    if (isStreaming && !outputLines.some((l) => l.includes('typewriter-cursor'))) {
+      outputLines.push(`<p class="smart-p">${cursorHtml}</p>`);
+    }
+
+    return `<div class="smart-formatted">${outputLines.join('')}</div>`;
   }
 
   async function triggerSmartAnalysis() {
@@ -1312,17 +1385,29 @@ Format with markdown headers and bullet points. Keep it professional, concise, a
   function updateTimeline() {
     ui.timeline.max = String(maxDuration); ui.timeline.value = String(Math.min(cursor, maxDuration)); ui.timeline.disabled = !activeData.length; ui.play.disabled = !activeData.length || maxDuration <= 0;
     ui.current.textContent = fmtExact(cursor); ui.duration.textContent = `/ ${fmtTime(maxDuration)}`;
-    ui.context.textContent = activeData.length > 1 ? `Multiple journeys · shared elapsed cursor relative to each match start.` : activeData.length ? `Match ${activeData[0].id} · recorded time from match start.` : 'Choose a match to scrub through recorded time.';
-    const events = matchesEvents().filter((e) => EVENT_LABELS[e.type]);
+    ui.context.textContent = activeData.length > 1 ? `${activeData.length} matches selected` : activeData.length ? `Match ${activeData[0].id}` : 'Choose a match to scrub through recorded time.';
+    const events = matchesEvents().filter((e) => EVENT_LABELS[e.type] && isEventMatch(e, currentEventFilter));
     ui.ticks.replaceChildren();
     for (const e of events) { const tick = document.createElement('i'); tick.style.left = `${maxDuration ? e.t / maxDuration * 100 : 0}%`; tick.title = `${EVENT_LABELS[e.type]} at ${fmtExact(e.t)}`; ui.ticks.append(tick); }
     ui.timeline.style.setProperty('--progress', `${maxDuration ? cursor / maxDuration * 100 : 0}%`);
     updateTimelineCounts();
   }
   function updateTimelineCounts() {
-    let low = 0, high = cachedDiscrete.length;
-    while (low < high) { const mid = (low + high) >> 1; if (cachedDiscrete[mid].t <= cursor) low = mid + 1; else high = mid; }
-    ui.tickCount.textContent = `${low} / ${cachedDiscrete.length} events shown`;
+    if (!ui.tickCount) return;
+    const list = cachedDiscrete.filter((e) => isEventMatch(e, currentEventFilter));
+    let low = 0, high = list.length;
+    while (low < high) { const mid = (low + high) >> 1; if (list[mid].t <= cursor) low = mid + 1; else high = mid; }
+    const label = currentEventFilter === 'all' ? 'events' :
+                  currentEventFilter === 'KilledByStorm' ? 'storm deaths' :
+                  currentEventFilter === 'combat' ? 'combat events' :
+                  currentEventFilter === 'kills' ? 'kills' :
+                  currentEventFilter === 'deaths' ? 'deaths' :
+                  currentEventFilter === 'Kill' ? 'human kills' :
+                  currentEventFilter === 'BotKill' ? 'bot kills' :
+                  currentEventFilter === 'Killed' ? 'human casualties' :
+                  currentEventFilter === 'BotKilled' ? 'bot casualties' :
+                  currentEventFilter === 'Loot' ? 'loot records' : `${currentEventFilter} events`;
+    ui.tickCount.textContent = `${low} / ${list.length} ${label} shown`;
   }
 
   function setCursor(time) {
@@ -1668,6 +1753,7 @@ Format with markdown headers and bullet points. Keep it professional, concise, a
     fitView();
     activeHeatModes.clear();
     syncHeatControls();
+    setEventFilter('all');
     isAllDates = false;
     const dates = availableDatesForMap();
     selectedDates = dates.length ? [dates[dates.length - 1]] : [];
@@ -1676,14 +1762,37 @@ Format with markdown headers and bullet points. Keep it professional, concise, a
     updateMatches();
   });
 
+  function setupEventFilters() {
+    if (ui.eventFilter) {
+      ui.eventFilter.addEventListener('change', () => {
+        setEventFilter(ui.eventFilter.value);
+      });
+    }
+    if (ui.allSignalsFilter) {
+      ui.allSignalsFilter.addEventListener('change', () => {
+        setEventFilter(ui.allSignalsFilter.value);
+      });
+    }
+    document.querySelectorAll('.legend-filter-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const filter = btn.getAttribute('data-filter');
+        toggleEventFilter(filter);
+      });
+      btn.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          const filter = btn.getAttribute('data-filter');
+          toggleEventFilter(filter);
+        }
+      });
+    });
+  }
+
   function setupIntelTabs() {
     if (ui.tabInsights) ui.tabInsights.addEventListener('click', () => switchIntelTab('insights'));
     if (ui.tabSmart) ui.tabSmart.addEventListener('click', () => switchIntelTab('smart'));
     if (ui.tabCombat) ui.tabCombat.addEventListener('click', () => switchIntelTab('combat'));
     if (ui.tabAll) ui.tabAll.addEventListener('click', () => switchIntelTab('all'));
-    if (ui.allSignalsFilter) {
-      ui.allSignalsFilter.addEventListener('change', () => updateEvents(true));
-    }
     if (ui.runSmartAnalysis) ui.runSmartAnalysis.addEventListener('click', triggerSmartAnalysis);
     if (ui.rerunSmartAnalysis) ui.rerunSmartAnalysis.addEventListener('click', triggerSmartAnalysis);
     if (ui.copySmartAnalysis) {
@@ -1702,6 +1811,7 @@ Format with markdown headers and bullet points. Keep it professional, concise, a
   setupMapInteractions();
   setupDateModal();
   setupMatchModal();
+  setupEventFilters();
   setupIntelTabs();
   setupSmartModal();
 

@@ -14,12 +14,6 @@
       <span class="brand-divider" aria-hidden="true"></span>
       <span class="brand-product">BLACK <small>MATCH EXPLORER</small></span>
     </a>
-    <nav class="top-nav" aria-label="Workspace">
-      <span class="nav-title"><i class="status-dot ready" aria-hidden="true"></i> Telemetry</span>
-      <span class="nav-current">Player Journeys</span>
-      <span class="nav-context">Level Design Intelligence</span>
-    </nav>
-    <div class="dataset-status"><span class="status-dot" aria-hidden="true"></span><span id="statusText" role="status" aria-live="polite">Loading match index…</span></div>
   </header>
   <main class="shell">
     <section class="intro">
@@ -50,8 +44,19 @@
       <div class="filter-field-group match-field">
         <label class="filter-field match-select-label"><span>Match</span><select id="matchSelect" disabled><option>Loading…</option></select></label>
         <button class="button button-quiet button-compact" id="customMatchBtn" type="button" title="Select multiple matches to analyze together" disabled>Select matches…</button>
-        <button class="button button-compact button-smart" id="openSmartModalBtn" type="button" title="Open AI Smart Analysis for the current telemetry">✦ Smart Analysis</button>
       </div>
+      <label class="filter-field event-field"><span>Events</span><select id="eventFilterSelect" disabled>
+        <option value="all">All events</option>
+        <option value="KilledByStorm">⚡ Storm deaths</option>
+        <option value="combat">⚔ Combat only</option>
+        <option value="kills">🎯 Kills (All)</option>
+        <option value="Kill">· Human Kills</option>
+        <option value="BotKill">· Bot Kills</option>
+        <option value="deaths">☠ Deaths (All)</option>
+        <option value="Killed">· Human Casualties</option>
+        <option value="BotKilled">· Bot Casualties</option>
+        <option value="Loot">◈ Loot only</option>
+      </select></label>
       <button class="button button-quiet" id="resetButton" type="button" disabled><span aria-hidden="true">↺</span> Reset view</button>
     </section>
     <div id="notice" class="notice" role="status" hidden></div>
@@ -61,7 +66,7 @@
           <div class="map-title"><p class="eyebrow"><span class="section-number">02</span> SPATIAL READOUT</p><h2 id="mapHeading">Match map</h2></div>
           <div class="map-tools" aria-label="Map controls"><button class="icon-button" id="zoomOut" type="button" aria-label="Zoom out" title="Zoom out" disabled>−</button><button class="icon-button" id="zoomIn" type="button" aria-label="Zoom in" title="Zoom in" disabled>+</button><button class="icon-button fit-button" id="fitButton" type="button" title="Fit map" disabled>Fit</button></div>
         </div>
-        <div class="map-viewport" id="mapViewport" aria-label="Interactive match map. Use zoom buttons or drag to pan.">
+        <div class="map-viewport" id="mapViewport" aria-label="Interactive match map.">
           <div class="map-empty" id="mapEmpty"><span class="empty-symbol" aria-hidden="true">⌖</span><strong>Choose a match to begin</strong><span>Movement traces and event locations appear here.</span></div>
           <svg id="mapSvg" viewBox="0 0 1024 1024" role="img" aria-label="Player paths and event locations on the minimap" hidden>
             <image id="mapImage" x="0" y="0" width="1024" height="1024" preserveAspectRatio="none"></image>
@@ -72,16 +77,17 @@
           </svg>
           <div class="map-caption"><span id="mapCaption">No map selected</span><span id="outsideCount"></span></div>
           <div class="map-tooltip" id="mapTooltip" role="status" hidden></div>
-          <div class="map-watermark" aria-hidden="true">BLACK <span>FIELD / 01</span></div>
         </div>
-        <p class="map-help">Drag to pan · use + / − to zoom</p>
         <div class="map-footer">
           <div class="legend-block"><p class="legend-heading">MAP KEY <span>· ENTITY &amp; EVENT</span></p>
             <div class="legend" aria-label="Map legend">
               <span><i class="legend-line human"></i>Human path</span><span><i class="legend-line bot"></i>Bot path</span>
-              <span><i class="legend-dot kill"></i>Kill</span><span><i class="legend-dot botkill"></i>BotKill</span>
-              <span><i class="legend-dot killed"></i>Killed</span><span><i class="legend-dot botkilled"></i>BotKilled</span>
-              <span><i class="legend-diamond loot"></i>Loot</span><span><i class="legend-storm"></i>Storm death</span>
+              <span class="legend-filter-btn" data-filter="Kill" role="button" tabindex="0" title="Click to filter map by Kills"><i class="legend-dot kill"></i>Kill</span>
+              <span class="legend-filter-btn" data-filter="BotKill" role="button" tabindex="0" title="Click to filter map by BotKills"><i class="legend-dot botkill"></i>BotKill</span>
+              <span class="legend-filter-btn" data-filter="Killed" role="button" tabindex="0" title="Click to filter map by Casualties"><i class="legend-dot killed"></i>Killed</span>
+              <span class="legend-filter-btn" data-filter="BotKilled" role="button" tabindex="0" title="Click to filter map by Bot Deaths"><i class="legend-dot botkilled"></i>BotKilled</span>
+              <span class="legend-filter-btn" data-filter="Loot" role="button" tabindex="0" title="Click to filter map by Loot"><i class="legend-diamond loot"></i>Loot</span>
+              <span class="legend-filter-btn" data-filter="KilledByStorm" role="button" tabindex="0" title="Click to filter map by Storm deaths"><i class="legend-storm"></i>Storm death</span>
             </div>
           </div>
           <div class="heat-controls-wrap">
@@ -93,17 +99,15 @@
               <button type="button" class="chip-btn" id="chipTraffic" data-mode="traffic" aria-pressed="false" title="Toggle player traffic density (teal)"><span class="chip-dot traffic"></span> ◈ Traffic</button>
               <button type="button" class="chip-btn" id="chipKills" data-mode="kills" aria-pressed="false" title="Toggle combat kill density (coral)"><span class="chip-dot kills"></span> ⚔ Kills</button>
               <button type="button" class="chip-btn" id="chipDeaths" data-mode="deaths" aria-pressed="false" title="Toggle casualty/death density (violet)"><span class="chip-dot deaths"></span> ☠ Deaths</button>
-              <button type="button" class="chip-btn chip-clear" id="chipClearHeat" title="Turn all heatmaps off" disabled>Off</button>
             </div>
           </div>
         </div>
         <p class="heat-note" id="heatNote" hidden></p>
-        <p class="data-caveat"><span aria-hidden="true">i</span> Event names reflect recorded telemetry labels; a “kill” is a kill record, not an independently verified outcome.</p>
       </section>
       <section class="panel timeline-panel" aria-labelledby="timelineHeading">
         <div class="timeline-top"><div><p class="eyebrow"><span class="section-number">03</span> MATCH PLAYBACK</p><h2 id="timelineHeading">Follow the run<span class="timeline-subtitle">SCRUB · PLAY · INSPECT</span></h2><p class="timeline-context" id="timelineContext">Choose a match to scrub through recorded time.</p></div><div class="time-readout"><strong id="currentTime">00:00</strong><span id="durationLabel">/ 00:00</span></div></div>
         <div class="scrubber-row"><button class="play-button" id="playButton" type="button" aria-label="Play timeline" disabled><span id="playIcon" aria-hidden="true">▶</span></button><div class="scrubber-wrap"><input id="timeline" type="range" min="0" max="0" step="0.1" value="0" aria-label="Playback time" disabled><div class="ticks" id="timelineTicks" aria-hidden="true"></div></div><label class="speed-label"><span>SPEED</span><select id="speedSelect" aria-label="Playback speed"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option><option value="8">8×</option><option value="16">16×</option><option value="32">32×</option></select></label></div>
-        <div class="timeline-foot"><span id="timelineEventCount">No events in view</span><span>Time is relative to each match start</span></div>
+        <div class="timeline-foot"><span id="timelineEventCount">No events in view</span></div>
       </section>
       <aside class="side-panel">
         <section class="panel summary-panel" aria-labelledby="summaryHeading"><div class="panel-heading"><div><p class="eyebrow"><span class="section-number">04</span> RUN PROFILE</p><h2 id="summaryHeading">At a glance</h2></div></div><div id="summaryContent" class="summary-content"><p class="muted">Select a match to see its overview.</p></div></section>
@@ -115,7 +119,7 @@
             </div>
             <div class="intel-tabs" role="tablist" aria-label="Intelligence views">
               <button type="button" class="intel-tab is-active" id="tabInsights" role="tab" aria-selected="true" aria-controls="viewInsights">Insights</button>
-              <button type="button" class="intel-tab" id="tabSmart" role="tab" aria-selected="false" aria-controls="viewSmart">✦ Smart Analysis</button>
+              <button type="button" class="intel-tab smart-tab-highlight" id="tabSmart" role="tab" aria-selected="false" aria-controls="viewSmart">✦ Smart Analysis</button>
               <button type="button" class="intel-tab" id="tabCombat" role="tab" aria-selected="false" aria-controls="viewCombat">Combat feed</button>
               <button type="button" class="intel-tab" id="tabAll" role="tab" aria-selected="false" aria-controls="viewAll">All signals</button>
             </div>
@@ -205,9 +209,15 @@
                 <label for="allSignalsFilter" class="sr-only">Filter event type</label>
                 <select id="allSignalsFilter" class="feed-filter-select">
                   <option value="all">All signals</option>
-                  <option value="combat">Combat only</option>
-                  <option value="Loot">Loot only</option>
-                  <option value="KilledByStorm">Storm deaths</option>
+                  <option value="KilledByStorm">⚡ Storm deaths</option>
+                  <option value="combat">⚔ Combat only</option>
+                  <option value="kills">🎯 Kills (All)</option>
+                  <option value="Kill">· Human Kills</option>
+                  <option value="BotKill">· Bot Kills</option>
+                  <option value="deaths">☠ Deaths (All)</option>
+                  <option value="Killed">· Human Casualties</option>
+                  <option value="BotKilled">· Bot Casualties</option>
+                  <option value="Loot">◈ Loot only</option>
                 </select>
               </div>
               <span class="event-count" id="eventCount">—</span>
